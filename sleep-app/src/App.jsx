@@ -171,7 +171,7 @@ export default function App() {
         <div style={{textAlign:"center",marginBottom:44,animation:"fadeUp 0.6s ease"}}>
           <div style={{fontSize:52,marginBottom:8}}>🌙</div>
           <h1 style={{
-            fontFamily:"'Syne',sans-serif", fontSize:"clamp(26px,5vw,36px)",
+            fontFamily:"'Montserrat',sans-serif", fontSize:"clamp(26px,5vw,36px)",
             fontWeight:800, margin:0, letterSpacing:-0.5,
             background:"linear-gradient(135deg,#c4b5fd 0%,#a78bfa 40%,#818cf8 100%)",
             WebkitBackgroundClip:"text", WebkitTextFillColor:"transparent"
