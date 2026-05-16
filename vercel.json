@@ -17,8 +17,12 @@
       "dest": "api/sleepcheck.py"
     },
     {
+      "src": "/assets/(.*)",
+      "dest": "sleep-app/assets/$1"
+    },
+    {
       "src": "/(.*)",
-      "dest": "sleep-app/$1"
+      "dest": "sleep-app/index.html"
     }
   ]
 }
