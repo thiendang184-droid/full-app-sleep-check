@@ -1,0 +1,24 @@
+{
+  "version": 2,
+  "builds": [
+    {
+      "src": "api/sleepcheck.py",
+      "use": "@vercel/python"
+    },
+    {
+      "src": "sleep-app/package.json",
+      "use": "@vercel/static-build",
+      "config": { "distDir": "dist" }
+    }
+  ],
+  "routes": [
+    {
+      "src": "/api/(.*)",
+      "dest": "api/sleepcheck.py"
+    },
+    {
+      "src": "/(.*)",
+      "dest": "sleep-app/$1"
+    }
+  ]
+}
