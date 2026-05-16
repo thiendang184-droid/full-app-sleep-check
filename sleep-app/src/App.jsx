@@ -254,7 +254,7 @@ export default function App() {
               <div style={{position:"absolute",top:-40,right:-40,width:200,height:200,borderRadius:"50%",
                 background:"radial-gradient(circle,rgba(167,139,250,0.08),transparent)",pointerEvents:"none"}}/>
 
-              <h2 style={{fontFamily:"'Syne',sans-serif",fontSize:18,fontWeight:800,
+              <h2 style={{fontFamily:"'Montserrat',sans-serif",fontSize:18,fontWeight:800,
                 color:"rgba(255,255,255,0.9)",marginTop:0,marginBottom:28,letterSpacing:-0.3,textAlign:"center"}}>
                 📊 Kết quả phân tích
               </h2>
