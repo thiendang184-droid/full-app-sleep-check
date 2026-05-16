@@ -85,28 +85,6 @@ function DisorderBadge({disorder}) {
   );
 }
 
-function buildPrompt(vals) {
-  return `Bạn là chuyên gia phân tích giấc ngủ AI. Hãy dự đoán chất lượng giấc ngủ dựa trên thông tin sau và trả lời CHÍNH XÁC theo định dạng JSON (không thêm text nào khác):
-
-Thông tin người dùng:
-- Giới tính: ${vals.gender}
-- Tuổi: ${vals.age}
-- Số giờ ngủ/đêm: ${vals.sleep_duration}h
-- Mức độ hoạt động thể chất: ${vals.physical_activity}/100
-- Mức độ stress: ${vals.stress_level}/10
-- BMI Category: ${vals.bmi_category}
-- Nhịp tim lúc nghỉ: ${vals.heart_rate} bpm
-- Số bước chân/ngày: ${vals.daily_steps}
-
-Trả lời JSON với cấu trúc sau (không có markdown, chỉ JSON thuần):
-{
-  "quality": <số nguyên từ 4-9 đánh giá chất lượng giấc ngủ>,
-  "disorder": "<một trong: None / Insomnia / Sleep Apnea>",
-  "fatigue": <số nguyên từ 1-10 đánh giá mức độ mệt mỏi>,
-  "advice": "<2-3 câu tư vấn cải thiện giấc ngủ bằng tiếng Việt, thực tế và cụ thể>"
-}`;
-}
-
 export default function App() {
   const [vals, setVals] = useState(DEFAULT_VALS);
   const [result, setResult] = useState(null);
@@ -116,26 +94,36 @@ export default function App() {
 
   const set = (k,v) => setVals(p=>({...p,[k]:v}));
 
+  // SỬA ĐỔI CHÍNH XÁC: Trỏ API trực tiếp về luồng xử lý mạng Perceptron Python
   async function predict() {
     setLoading(true); setError(""); setResult(null);
     try {
-      const res = await fetch("https://api.anthropic.com/v1/messages", {
-        method:"POST",
-        headers:{"Content-Type":"application/json"},
-        body: JSON.stringify({
-          model:"claude-sonnet-4-20250514",
-          max_tokens:1000,
-          messages:[{role:"user", content: buildPrompt(vals)}]
-        })
+      // Tự động phân tách URL: Chạy localhost dùng proxy Vite, chạy Vercel gọi API nội bộ
+      const apiUrl = window.location.hostname === 'localhost' 
+        ? '/api/sleepcheck' 
+        : `${window.location.origin}/api/sleepcheck`;
+
+      const res = await fetch(apiUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(vals) // Đẩy gói dữ liệu JSON sang Flask
       });
+      
+      if (!res.ok) {
+        throw new Error("Mạng thần kinh Perceptron phản hồi lỗi cấu trúc.");
+      }
+
       const data = await res.json();
-      const text = data.content?.map(b=>b.text||"").join("").trim();
-      const clean = text.replace(/```json|```/g,"").trim();
-      const parsed = JSON.parse(clean);
-      setResult(parsed);
-      setStep(1);
+      
+      if (data.status === "success") {
+        // Áp kết quả tính toán từ numpy thuần lên các vòng tròn hiển thị
+        setResult(data.data);
+        setStep(1);
+      } else {
+        setError(data.message || "Lỗi xử lý hệ thống mạng Perceptron.");
+      }
     } catch(e) {
-      setError("Lỗi phân tích. Vui lòng thử lại.");
+      setError("Lỗi kết nối API phân tích dữ liệu giấc ngủ. Vui lòng thử lại.");
     }
     setLoading(false);
   }
@@ -183,7 +171,7 @@ export default function App() {
         <div style={{textAlign:"center",marginBottom:44,animation:"fadeUp 0.6s ease"}}>
           <div style={{fontSize:52,marginBottom:8}}>🌙</div>
           <h1 style={{
-            fontFamily:"'Montserrat',sans-serif", fontSize:"clamp(26px,5vw,36px)",
+            fontFamily:"'Syne',sans-serif", fontSize:"clamp(26px,5vw,36px)",
             fontWeight:800, margin:0, letterSpacing:-0.5,
             background:"linear-gradient(135deg,#c4b5fd 0%,#a78bfa 40%,#818cf8 100%)",
             WebkitBackgroundClip:"text", WebkitTextFillColor:"transparent"

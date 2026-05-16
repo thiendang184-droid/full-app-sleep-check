@@ -94,19 +94,29 @@ export default function App() {
 
   const set = (k,v) => setVals(p=>({...p,[k]:v}));
 
-  // SỬA ĐỔI: Chuyển hướng xử lý từ gọi Anthropic API sang gọi thẳng về hệ thống mạng Perceptron Python cục bộ
+  // SỬA ĐỔI CHÍNH XÁC: Trỏ API trực tiếp về luồng xử lý mạng Perceptron Python
   async function predict() {
     setLoading(true); setError(""); setResult(null);
     try {
-      const res = await fetch("/api/sleepcheck", {
+      // Tự động phân tách URL: Chạy localhost dùng proxy Vite, chạy Vercel gọi API nội bộ
+      const apiUrl = window.location.hostname === 'localhost' 
+        ? '/api/sleepcheck' 
+        : `${window.location.origin}/api/sleepcheck`;
+
+      const res = await fetch(apiUrl, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(vals)
+        body: JSON.stringify(vals) // Đẩy gói dữ liệu JSON sang Flask
       });
       
+      if (!res.ok) {
+        throw new Error("Mạng thần kinh Perceptron phản hồi lỗi cấu trúc.");
+      }
+
       const data = await res.json();
       
       if (data.status === "success") {
+        // Áp kết quả tính toán từ numpy thuần lên các vòng tròn hiển thị
         setResult(data.data);
         setStep(1);
       } else {
