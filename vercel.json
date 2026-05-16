@@ -8,7 +8,9 @@
     {
       "src": "sleep-app/package.json",
       "use": "@vercel/static-build",
-      "config": { "distDir": "dist" }
+      "config": {
+        "distDir": "dist"
+      }
     }
   ],
   "routes": [
@@ -17,12 +19,8 @@
       "dest": "api/sleepcheck.py"
     },
     {
-      "src": "/assets/(.*)",
-      "dest": "sleep-app/assets/$1"
-    },
-    {
       "src": "/(.*)",
-      "dest": "sleep-app/index.html"
+      "dest": "sleep-app/$1"
     }
   ]
 }
