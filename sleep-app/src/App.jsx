@@ -34,7 +34,7 @@ const FIELDS = {
   stress_level: { label: "Mức độ stress", type: "number", min:1, max:10, icon: "😓", unit:"/10" },
   bmi_category: { label: "Chỉ số BMI", type: "select", options: ["Normal","Normal Weight","Obese","Overweight"], icon: "⚖️" },
   heart_rate: { label: "Nhịp tim lúc nghỉ", type: "number", min:40, max:120, icon: "❤️", unit:"bpm" },
-  daily_steps: { label: "Số bước chân / ngày", type: "number", min:0, max:30000, icon: "👟", unit:"bước" },
+  daily_steps: { label: "Số bước chân / ngày", type: "number_input", min:0, max:30000, icon: "👟", unit:"bước" },
 };
 
 const DEFAULT_VALS = {
@@ -94,11 +94,9 @@ export default function App() {
 
   const set = (k,v) => setVals(p=>({...p,[k]:v}));
 
-  // SỬA ĐỔI CHÍNH XÁC: Trỏ API trực tiếp về luồng xử lý mạng Perceptron Python
   async function predict() {
     setLoading(true); setError(""); setResult(null);
     try {
-      // Tự động phân tách URL: Chạy localhost dùng proxy Vite, chạy Vercel gọi API nội bộ
       const apiUrl = window.location.hostname === 'localhost' 
         ? '/api/sleepcheck' 
         : `${window.location.origin}/api/sleepcheck`;
@@ -106,7 +104,7 @@ export default function App() {
       const res = await fetch(apiUrl, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(vals) // Đẩy gói dữ liệu JSON sang Flask
+        body: JSON.stringify(vals)
       });
       
       if (!res.ok) {
@@ -116,7 +114,6 @@ export default function App() {
       const data = await res.json();
       
       if (data.status === "success") {
-        // Áp kết quả tính toán từ numpy thuần lên các vòng tròn hiển thị
         setResult(data.data);
         setStep(1);
       } else {
@@ -148,6 +145,8 @@ export default function App() {
         ::-webkit-scrollbar-thumb{background:#2d1b69;border-radius:3px}
         input[type=range]{-webkit-appearance:none;appearance:none;background:rgba(255,255,255,0.1);height:4px;border-radius:2px;outline:none;cursor:pointer}
         input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:16px;height:16px;border-radius:50%;background:#a78bfa;box-shadow:0 0 8px #a78bfa88;cursor:pointer}
+        input[type=number]{-moz-appearance:textfield;}
+        input[type=number]::-webkit-inner-spin-button,input[type=number]::-webkit-outer-spin-button{-webkit-appearance:none;margin:0;}
         select{background:#13082a;border:1px solid rgba(167,139,250,0.25);color:white;padding:10px 14px;border-radius:10px;outline:none;width:100%;font-family:inherit;font-size:14px;cursor:pointer}
         select:focus{border-color:#a78bfa}
         option{background:#13082a}
@@ -155,6 +154,9 @@ export default function App() {
         .predict-btn:hover{transform:translateY(-2px);box-shadow:0 12px 40px rgba(167,139,250,0.4)!important}
         .predict-btn:active{transform:translateY(0)}
         .predict-btn:disabled{opacity:0.6;cursor:not-allowed}
+        .steps-input{background:#13082a;border:1px solid rgba(167,139,250,0.25);color:white;padding:10px 14px;border-radius:10px;outline:none;width:100%;font-family:inherit;font-size:15px;font-weight:600;box-sizing:border-box;transition:border-color 0.2s ease;}
+        .steps-input:focus{border-color:#a78bfa;}
+        .steps-input::placeholder{color:rgba(255,255,255,0.2);}
       `}</style>
 
       <StarField/>
@@ -197,13 +199,31 @@ export default function App() {
                       <span style={{fontSize:18}}>{field.icon}</span>
                       <span style={{fontSize:12,fontWeight:600,color:"rgba(255,255,255,0.5)",
                         letterSpacing:0.8,textTransform:"uppercase"}}>{field.label}</span>
-                      {field.unit && <span style={{marginLeft:"auto",fontSize:12,color:"#a78bfa",fontWeight:700}}>{v}{field.unit}</span>}
+                      {field.type !== "number_input" && field.unit && (
+                        <span style={{marginLeft:"auto",fontSize:12,color:"#a78bfa",fontWeight:700}}>{v}{field.unit}</span>
+                      )}
                     </div>
 
                     {field.type==="select" ? (
                       <select value={v} onChange={e=>set(key,e.target.value)}>
                         {field.options.map(o=><option key={o}>{o}</option>)}
                       </select>
+                    ) : field.type==="number_input" ? (
+                      <div style={{display:"flex",alignItems:"center",gap:10}}>
+                        <input
+                          type="number"
+                          className="steps-input"
+                          min={field.min}
+                          max={field.max}
+                          value={v}
+                          placeholder="Nhập số bước..."
+                          onChange={e => {
+                            const parsed = parseInt(e.target.value) || 0;
+                            set(key, Math.min(field.max, Math.max(field.min, parsed)));
+                          }}
+                        />
+                        <span style={{fontSize:13,color:"#a78bfa",fontWeight:700,whiteSpace:"nowrap"}}>{field.unit}</span>
+                      </div>
                     ) : (
                       <div>
                         <input type="range" min={field.min} max={field.max} step={field.step||1}
