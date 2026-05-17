@@ -1,19 +1,4 @@
-"""
-=============================================================
-  DỰ ĐOÁN CHẤT LƯỢNG GIẤC NGỦ BẰNG PERCEPTRON NETWORK
-=============================================================
-INPUT  : Age, Gender, Sleep Duration, Physical Activity Level,
-         Stress Level, BMI Category, Heart Rate, Daily Steps
-OUTPUT : Quality of Sleep   (hồi quy → làm tròn)
-         Sleep Disorder      (phân loại: None / Insomnia / Sleep Apnea)
-         Fatigue Level       (sinh tổng hợp từ data, hồi quy → làm tròn)
 
-FIXES:
-  - Weighted cross-entropy loss để xử lý class imbalance
-  - Tăng N_HIDDEN lên 64, EPOCHS lên 1000
-  - Rule-based override cho trường hợp cực đoan rõ ràng
-=============================================================
-"""
 
 import numpy as np
 import pandas as pd
@@ -240,7 +225,7 @@ def predict_new(age, gender, sleep_duration, physical_activity,
                         stress_level, bmi_enc, heart_rate, daily_steps]], dtype=float)
     x_scaled = scaler.transform(x_raw)
 
-    q = int(model_quality.predict(x_scaled).round().clip(4, 9)[0])
+    q = int(model_quality.predict(x_scaled).round().clip(1, 10)[0])
     d_idx = model_disorder.predict(x_scaled)[0]
     d = le_disorder.inverse_transform([d_idx])[0]
     f = int(model_fatigue.predict(x_scaled).round().clip(1, 10)[0])
@@ -270,6 +255,24 @@ def predict_new(age, gender, sleep_duration, physical_activity,
             d = "Insomnia"
         elif apnea_score >= 4 and apnea_score > insomnia_score:
             d = "Sleep Apnea"
+
+    # ── FIX 4: Rule-based override cho Quality of Sleep ─────
+    # Tính điểm penalty dựa trên các yếu tố ảnh hưởng xấu
+    quality_penalty = 0
+
+    if sleep_duration <= 4.0:   quality_penalty += 3   # ngủ cực ít
+    elif sleep_duration <= 5.0: quality_penalty += 2   # ngủ ít
+    elif sleep_duration <= 6.0: quality_penalty += 1   # hơi ít
+
+    if stress_level >= 9:       quality_penalty += 2
+    elif stress_level >= 7:     quality_penalty += 1
+
+    if physical_activity < 20:  quality_penalty += 1
+    if heart_rate > 90:         quality_penalty += 1
+    if bmi_category == "Obese": quality_penalty += 1
+
+    # Áp penalty: trừ trực tiếp vào q, clamp về [1, 9]
+    q = max(1, min(9, q - quality_penalty))
     # ────────────────────────────────────────────────────────
 
     return {
