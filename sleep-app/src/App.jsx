@@ -87,6 +87,7 @@ function DisorderBadge({disorder}) {
 
 export default function App() {
   const [vals, setVals] = useState(DEFAULT_VALS);
+  const [stepsRaw, setStepsRaw] = useState("7000");
   const [result, setResult] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -215,11 +216,19 @@ export default function App() {
                           className="steps-input"
                           min={field.min}
                           max={field.max}
-                          value={v}
+                          value={stepsRaw}
                           placeholder="Nhập số bước..."
                           onChange={e => {
-                            const parsed = parseInt(e.target.value) || 0;
-                            set(key, Math.min(field.max, Math.max(field.min, parsed)));
+                            const raw = e.target.value;
+                            setStepsRaw(raw);
+                            const parsed = parseInt(raw);
+                            if (!isNaN(parsed)) set(key, Math.min(field.max, Math.max(field.min, parsed)));
+                          }}
+                          onBlur={() => {
+                            const parsed = parseInt(stepsRaw);
+                            const clamped = isNaN(parsed) ? 0 : Math.min(field.max, Math.max(field.min, parsed));
+                            setStepsRaw(String(clamped));
+                            set(key, clamped);
                           }}
                         />
                         <span style={{fontSize:13,color:"#a78bfa",fontWeight:700,whiteSpace:"nowrap"}}>{field.unit}</span>
@@ -301,20 +310,7 @@ export default function App() {
               </div>
             </div>
 
-            {/* Advice */}
-            {result.advice && (
-              <div style={{
-                background:"rgba(255,255,255,0.03)", border:"1px solid rgba(255,255,255,0.08)",
-                borderRadius:16, padding:"20px 22px", marginBottom:20
-              }}>
-                <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:12}}>
-                  <span style={{fontSize:16}}>💡</span>
-                  <span style={{fontSize:12,fontWeight:700,color:"rgba(255,255,255,0.5)",
-                    letterSpacing:0.8,textTransform:"uppercase"}}>Tư vấn từ AI</span>
-                </div>
-                <p style={{margin:0,color:"rgba(255,255,255,0.75)",fontSize:14,lineHeight:1.7,fontWeight:300}}>{result.advice}</p>
-              </div>
-            )}
+
 
             {/* Input summary */}
             <div style={{background:"rgba(255,255,255,0.02)",border:"1px solid rgba(255,255,255,0.06)",

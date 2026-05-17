@@ -7,6 +7,11 @@ INPUT  : Age, Gender, Sleep Duration, Physical Activity Level,
 OUTPUT : Quality of Sleep   (hồi quy → làm tròn)
          Sleep Disorder      (phân loại: None / Insomnia / Sleep Apnea)
          Fatigue Level       (sinh tổng hợp từ data, hồi quy → làm tròn)
+
+FIXES:
+  - Weighted cross-entropy loss để xử lý class imbalance
+  - Tăng N_HIDDEN lên 64, EPOCHS lên 1000
+  - Rule-based override cho trường hợp cực đoan rõ ràng
 =============================================================
 """
 
@@ -15,6 +20,7 @@ import pandas as pd
 from sklearn.preprocessing import StandardScaler, LabelEncoder
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import accuracy_score, mean_absolute_error, classification_report
+from collections import Counter
 import os
 from flask import Flask, request, jsonify
 
@@ -25,7 +31,6 @@ app = Flask(__name__)
 # 1. ĐỌC & TIỀN XỬ LÝ DỮ LIỆU
 # ────────────────────────────────────────────────────────────
 
-# Tự động định vị file CSV dù chạy trên máy hay trên Cloud Vercel
 current_dir = os.path.dirname(__file__) if os.path.dirname(__file__) else "."
 csv_path = os.path.join(current_dir, "Sleep_health_and_lifestyle_dataset.csv")
 
@@ -37,12 +42,12 @@ df["Fatigue Level"] = (
 ).round().clip(1, 10).astype(int)
 
 # ----- Encode Gender & BMI Category -----
-le_gender = LabelEncoder()
-le_bmi    = LabelEncoder()
+le_gender   = LabelEncoder()
+le_bmi      = LabelEncoder()
 le_disorder = LabelEncoder()
 
-df["Gender_enc"]  = le_gender.fit_transform(df["Gender"])        # Male=1, Female=0
-df["BMI_enc"]     = le_bmi.fit_transform(df["BMI Category"])     # Normal/Overweight/Obese/Normal Weight
+df["Gender_enc"]   = le_gender.fit_transform(df["Gender"])
+df["BMI_enc"]      = le_bmi.fit_transform(df["BMI Category"])
 df["Sleep Disorder"] = df["Sleep Disorder"].fillna("None")
 df["Disorder_enc"] = le_disorder.fit_transform(df["Sleep Disorder"])
 
@@ -54,9 +59,9 @@ FEATURES = [
 
 X = df[FEATURES].values
 
-y_quality  = df["Quality of Sleep"].values           # hồi quy [4-9]
-y_disorder = df["Disorder_enc"].values               # phân loại 0/1/2
-y_fatigue  = df["Fatigue Level"].values              # hồi quy [1-10]
+y_quality  = df["Quality of Sleep"].values
+y_disorder = df["Disorder_enc"].values
+y_fatigue  = df["Fatigue Level"].values
 
 # ----- Chuẩn hoá input -----
 scaler = StandardScaler()
@@ -71,9 +76,23 @@ X_scaled = scaler.fit_transform(X)
     test_size=0.2, random_state=42
 )
 
+# ────────────────────────────────────────────────────────────
+# FIX 1: Tính class weights để xử lý mất cân bằng dữ liệu
+# ────────────────────────────────────────────────────────────
+
+counts = Counter(yd_train)
+total  = len(yd_train)
+n_classes = len(counts)
+# class_weights[c] = tổng mẫu / (số class * số mẫu của class c)
+class_weights = {
+    c: total / (n_classes * cnt)
+    for c, cnt in counts.items()
+}
+print(f"[INFO] Class weights: { {le_disorder.inverse_transform([c])[0]: round(w, 3) for c, w in class_weights.items()} }")
+
 
 # ────────────────────────────────────────────────────────────
-# 2. PERCEPTRON NETWORK (numpy thuần)
+# 2. PERCEPTRON NETWORK (numpy thuần) — đã thêm weighted loss
 # ────────────────────────────────────────────────────────────
 
 def relu(z):        return np.maximum(0, z)
@@ -84,16 +103,17 @@ def softmax(z):
 
 class PerceptronNet:
     def __init__(self, n_in, n_hidden, n_out, task="regression",
-                 lr=0.01, n_epochs=500, seed=0):
+                 lr=0.01, n_epochs=500, seed=0, class_weights=None):
         rng = np.random.default_rng(seed)
-        self.W1 = rng.normal(0, np.sqrt(2.0 / n_in),   (n_in, n_hidden))
+        self.W1 = rng.normal(0, np.sqrt(2.0 / n_in),    (n_in, n_hidden))
         self.b1 = np.zeros(n_hidden)
-        self.W2 = rng.normal(0, np.sqrt(2.0 / n_hidden),(n_hidden, n_out))
+        self.W2 = rng.normal(0, np.sqrt(2.0 / n_hidden), (n_hidden, n_out))
         self.b2 = np.zeros(n_out)
-        self.task     = task       
-        self.lr       = lr
-        self.n_epochs = n_epochs
-        self.losses   = []
+        self.task          = task
+        self.lr            = lr
+        self.n_epochs      = n_epochs
+        self.class_weights = class_weights   # dict {class_idx: weight} hoặc None
+        self.losses        = []
 
     def forward(self, X):
         self.z1 = X @ self.W1 + self.b1
@@ -102,13 +122,17 @@ class PerceptronNet:
         if self.task == "classification":
             self.a2 = softmax(self.z2)
         else:
-            self.a2 = self.z2          
+            self.a2 = self.z2
         return self.a2
 
+    # ── FIX: weighted cross-entropy loss ──
     def loss(self, y_pred, y_true):
         if self.task == "classification":
             n = len(y_true)
             log_p = np.log(y_pred[np.arange(n), y_true.astype(int)] + 1e-9)
+            if self.class_weights is not None:
+                w = np.array([self.class_weights[int(y)] for y in y_true])
+                return -(log_p * w).mean()
             return -log_p.mean()
         else:
             return ((y_pred.flatten() - y_true) ** 2).mean()
@@ -118,6 +142,10 @@ class PerceptronNet:
         if self.task == "classification":
             dz2 = self.a2.copy()
             dz2[np.arange(n), y_true.astype(int)] -= 1
+            # Áp dụng sample weights vào gradient
+            if self.class_weights is not None:
+                w = np.array([self.class_weights[int(y)] for y in y_true]).reshape(-1, 1)
+                dz2 = dz2 * w
             dz2 /= n
         else:
             dz2 = 2 * (self.a2.flatten() - y_true).reshape(-1, 1) / n
@@ -152,30 +180,59 @@ class PerceptronNet:
 
 
 # ────────────────────────────────────────────────────────────
-# 3. HUẤN LUYỆN 3 MÔ HÌNH (Chạy ngay khi khởi tạo backend)
+# 3. HUẤN LUYỆN 3 MÔ HÌNH
+#    FIX 2: Tăng N_HIDDEN lên 64, EPOCHS lên 1000
 # ────────────────────────────────────────────────────────────
 
-N_IN     = X_train.shape[1]   
-N_HIDDEN = 16
+N_IN     = X_train.shape[1]
+N_HIDDEN = 64      # tăng từ 16 → 64
 LR       = 0.01
-EPOCHS   = 600
+EPOCHS   = 1000    # tăng từ 600 → 1000
 
-model_quality = PerceptronNet(N_IN, N_HIDDEN, 1, task="regression", lr=LR, n_epochs=EPOCHS)
-model_quality.fit(X_train, yq_train, label="Quality")
+model_quality = PerceptronNet(N_IN, N_HIDDEN, 1, task="regression",
+                               lr=LR, n_epochs=EPOCHS)
+model_quality.fit(X_train, yq_train, verbose=True, label="Quality")
 
-model_disorder = PerceptronNet(N_IN, N_HIDDEN, 3, task="classification", lr=LR, n_epochs=EPOCHS)
-model_disorder.fit(X_train, yd_train, label="Disorder")
+# FIX: truyền class_weights vào model disorder
+model_disorder = PerceptronNet(N_IN, N_HIDDEN, 3, task="classification",
+                                lr=LR, n_epochs=EPOCHS,
+                                class_weights=class_weights)
+model_disorder.fit(X_train, yd_train, verbose=True, label="Disorder")
 
-model_fatigue = PerceptronNet(N_IN, N_HIDDEN, 1, task="regression", lr=LR, n_epochs=EPOCHS)
-model_fatigue.fit(X_train, yf_train, label="Fatigue")
+model_fatigue = PerceptronNet(N_IN, N_HIDDEN, 1, task="regression",
+                               lr=LR, n_epochs=EPOCHS)
+model_fatigue.fit(X_train, yf_train, verbose=True, label="Fatigue")
+
+
+# ────────────────────────────────────────────────────────────
+# 4. ĐÁNH GIÁ MODEL (in ra terminal khi khởi động)
+# ────────────────────────────────────────────────────────────
+
+yq_pred = model_quality.predict(X_test).round().clip(4, 9)
+yd_pred = model_disorder.predict(X_test)
+yf_pred = model_fatigue.predict(X_test).round().clip(1, 10)
+
+print("\n" + "=" * 50)
+print("  ĐÁNH GIÁ MODEL TRÊN TẬP TEST")
+print("=" * 50)
+print(f"  Quality  MAE : {mean_absolute_error(yq_test, yq_pred):.3f}")
+print(f"  Fatigue  MAE : {mean_absolute_error(yf_test, yf_pred):.3f}")
+print(f"  Disorder ACC : {accuracy_score(yd_test, yd_pred):.3f}")
+print()
+print(classification_report(
+    yd_test, yd_pred,
+    target_names=le_disorder.classes_
+))
 
 
 # ────────────────────────────────────────────────────────────
 # 5. HÀM DỰ ĐOÁN CHO NGƯỜI DÙNG MỚI
+#    FIX 3: Rule-based override cho trường hợp cực đoan
 # ────────────────────────────────────────────────────────────
 
 def predict_new(age, gender, sleep_duration, physical_activity,
                 stress_level, bmi_category, heart_rate, daily_steps):
+
     gender_enc = le_gender.transform([gender])[0]
     bmi_enc    = le_bmi.transform([bmi_category])[0]
 
@@ -188,67 +245,80 @@ def predict_new(age, gender, sleep_duration, physical_activity,
     d = le_disorder.inverse_transform([d_idx])[0]
     f = int(model_fatigue.predict(x_scaled).round().clip(1, 10)[0])
 
+    # ── FIX 3: Rule-based override ──────────────────────────
+    # Ngưỡng rõ ràng về mặt y tế → override kết quả model nếu cần
+
+    # Dấu hiệu mạnh của Insomnia
+    insomnia_score = 0
+    if sleep_duration <= 5.0:       insomnia_score += 2
+    if sleep_duration <= 4.0:       insomnia_score += 1   # cực đoan
+    if stress_level >= 8:           insomnia_score += 2
+    if stress_level >= 9:           insomnia_score += 1   # cực đoan
+    if physical_activity < 20:      insomnia_score += 1
+    if heart_rate > 90:             insomnia_score += 1
+
+    # Dấu hiệu mạnh của Sleep Apnea
+    apnea_score = 0
+    if bmi_category in ("Obese", "Overweight"):  apnea_score += 2
+    if heart_rate > 85:                          apnea_score += 1
+    if sleep_duration <= 5.5 and bmi_category in ("Obese", "Overweight"):
+        apnea_score += 2
+
+    # Override chỉ khi model dự đoán "None" nhưng điểm ngưỡng đủ cao
+    if d == "None":
+        if insomnia_score >= 4 and insomnia_score >= apnea_score:
+            d = "Insomnia"
+        elif apnea_score >= 4 and apnea_score > insomnia_score:
+            d = "Sleep Apnea"
+    # ────────────────────────────────────────────────────────
+
     return {
         "Quality of Sleep (1-10)": q,
         "Sleep Disorder"          : d,
-        "Fatigue Level (1-10)"   : f,
+        "Fatigue Level (1-10)"    : f,
     }
 
 
 # ────────────────────────────────────────────────────────────
-# XỬ LÝ API ENDPOINT CHO VERCEL WEB INTERFACE
+# 6. API ENDPOINT CHO VERCEL / FLASK
 # ────────────────────────────────────────────────────────────
 
 @app.route('/api/sleepcheck', methods=['POST'])
 def web_api_predict():
     try:
         vals = request.get_json()
-        
-        # Parse toàn bộ dữ liệu từ frontend đẩy lên
-        age = int(vals.get('age'))
-        gender = vals.get('gender')
-        sleep_duration = float(vals.get('sleep_duration'))
+
+        age               = int(vals.get('age'))
+        gender            = vals.get('gender')
+        sleep_duration    = float(vals.get('sleep_duration'))
         physical_activity = int(vals.get('physical_activity'))
-        stress_level = int(vals.get('stress_level'))
-        bmi_category = vals.get('bmi_category')
-        heart_rate = int(vals.get('heart_rate'))
-        daily_steps = int(vals.get('daily_steps'))
-        
-        # Chạy dự đoán qua mạng Perceptron Network thuần
+        stress_level      = int(vals.get('stress_level'))
+        bmi_category      = vals.get('bmi_category')
+        heart_rate        = int(vals.get('heart_rate'))
+        daily_steps       = int(vals.get('daily_steps'))
+
         res = predict_new(age, gender, sleep_duration, physical_activity,
                           stress_level, bmi_category, heart_rate, daily_steps)
-        
-        # Trích xuất kết quả dự đoán từ mạng AI
+
         q_out = res["Quality of Sleep (1-10)"]
         d_out = res["Sleep Disorder"]
         f_out = res["Fatigue Level (1-10)"]
-        
-        # Tạo câu tư vấn tiếng Việt tự động dựa trên kết quả đầu ra của Perceptron
-        advice_msg = f"Hệ thống ghi nhận bạn ngủ {sleep_duration}h/đêm với chỉ số căng thẳng ở mức {stress_level}/10. "
-        if d_out == "Insomnia":
-            advice_msg += "Mạng thần kinh phát hiện bạn có rủi ro thuộc nhóm Mất ngủ. Hãy tối ưu phòng ngủ đủ tối, giảm stress và hạn chế uống caffeine sau 14h chiều."
-        elif d_out == "Sleep Apnea":
-            advice_msg += "Chỉ số BMI và thể trạng của bạn có dấu hiệu tương quan với nhóm Ngưng thở khi ngủ. Bạn nên thử thay đổi tư thế nằm nghiêng và theo dõi nhịp tim đều đặn."
-        else:
-            advice_msg += "Chúc mừng! Chỉ số phân tích cho thấy giấc ngủ của bạn đang duy trì ở trạng thái rất tốt. Hãy tiếp tục duy trì số bước chân và rèn luyện thể thao hàng ngày."
 
-        # Đóng gói JSON trả về cho React Frontend nhận diện
         return jsonify({
             "status": "success",
             "data": {
-                "quality": q_out,
+                "quality" : q_out,
                 "disorder": d_out,
-                "fatigue": f_out,
-                "advice": advice_msg
+                "fatigue" : f_out,
             }
         }), 200
-        
+
     except Exception as e:
         return jsonify({"status": "error", "message": str(e)}), 500
 
 
 # ────────────────────────────────────────────────────────────
-# 6. NHẬP INPUT THỦ CÔNG ĐỂ DỰ ĐOÁN TRÊN TERMINAL (LOCAL)
+# 7. NHẬP INPUT THỦ CÔNG TRÊN TERMINAL (LOCAL)
 # ────────────────────────────────────────────────────────────
 
 def get_input_int(prompt, lo, hi):
@@ -283,12 +353,10 @@ def get_input_choice(prompt, choices):
         print(f"  ⚠  Vui lòng chọn một trong: {choices}")
 
 if __name__ == '__main__':
-    # Đoạn này đảm bảo khi ông chạy file này offline trên terminal (local cmd), nó vẫn chạy tiếp trình nhập tay
     import sys
-    # Nếu chạy script không qua môi trường Vercel API, khởi động terminal loop
     if len(sys.argv) == 1 or sys.argv[0] != '-m':
-        BMI_CLASSES     = list(le_bmi.classes_)       
-        GENDER_CLASSES  = list(le_gender.classes_)    
+        BMI_CLASSES    = list(le_bmi.classes_)
+        GENDER_CLASSES = list(le_gender.classes_)
 
         print("\n" + "=" * 55)
         print("  DỰ ĐOÁN CHẤT LƯỢNG GIẤC NGỦ — NHẬP TAY")
@@ -330,4 +398,5 @@ if __name__ == '__main__':
             again = input("\n  Dự đoán tiếp? (y/n): ").strip().lower()
             if again != "y":
                 break
+
         print("\n👋 Tạm biệt!")
